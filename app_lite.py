@@ -94,30 +94,20 @@ def consultar_comite_ia(d):
     - Soportes: S1 {d['S1']} USD / S2 {d['S2']} USD | Resistencias: R1 {d['R1']} USD / R2 {d['R2']} USD
     Indica: 1) Veredicto directo (Comprar, Esperar o Vender), 2) Fase técnica, 3) Nivel exacto de entrada o cosecha, 4) Stop Loss matemático ({d['Stop_Loss']} USD).
     """
-    # Priorizamos gemini-3.8-flash y dejamos respaldo dinámico
-    modelos = ["gemini-3.8-flash", "gemini-3.0-flash", "gemini-2.5-pro", "gemini-pro"]
-    ultimo_error = ""
-    for nombre_modelo in modelos:
-        try:
-            model = genai.GenerativeModel(nombre_modelo)
-            resp = model.generate_content(prompt)
-            return resp.text.replace("$", "USD ")
-        except Exception as e:
-            ultimo_error = str(e)
-            continue
-
-    # Si ninguno de la lista fija coincide, busca automáticamente el primer modelo flash disponible en tu cuenta
+# Busca automáticamente los modelos compatibles en tu cuenta y elige el más reciente
     try:
-        for m in genai.list_models():
-            if "generateContent" in m.supported_generation_methods and "flash" in m.name:
-                model = genai.GenerativeModel(m.name)
-                resp = model.generate_content(prompt)
-                return resp.text.replace("$", "USD ")
-    except Exception:
-        pass
-
-    return f"Error al conectar con IA: {ultimo_error}"
-
+        disponibles = [
+            m.name for m in genai.list_models()
+            if "generateContent" in m.supported_generation_methods
+        ]
+        # Preferir modelos flash recientes
+        elegido = next((m for m in disponibles if "flash" in m), disponibles[0])
+        model = genai.GenerativeModel(elegido)
+        resp = model.generate_content(prompt)
+        return resp.text.replace("$", "USD ")
+    except Exception as e:
+        return f"Error al conectar con IA: {e}"
+        
 # 3. INTERFAZ DE DOS PESTAÑAS LIGERAS
 tab1, tab2 = st.tabs(["🏛️ Radar Francotirador", "📋 Mini-Auditor & Balance"])
 
