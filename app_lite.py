@@ -48,7 +48,7 @@ def analizar_ticker(ticker_symbol):
         r2 = pivot + (high_20 - low_20)
         s2 = pivot - (high_20 - low_20)
 
-        if precio > ema50 and precio > ema200::
+        if precio > ema50 and precio > ema200:
             score = 85
             estado = "Fuerte 🟢"
         elif precio > ema200 and precio <= ema50:
