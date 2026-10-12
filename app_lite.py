@@ -11,7 +11,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+API_KEY = (
+    st.secrets.get("GEMINI_API_KEY")
+    or st.secrets.get("GOOGLE_API_KEY")
+    or st.secrets.get("API_KEY")
+    or ""
+).strip()
+
 if API_KEY:
     genai.configure(api_key=API_KEY)
 
@@ -79,21 +85,38 @@ def analizar_ticker(ticker_symbol):
 
 def consultar_comite_ia(d):
     if not API_KEY:
-        return "⚠️ Configura GEMINI_API_KEY en los Secrets de Streamlit para activar el Comité IA."
+        return "⚠️ No se detectó GEMINI_API_KEY en los Secrets de Streamlit."
     prompt = f"""
     Actúa como el Comité Financiero GEM (Minervini, Tudor Jones, Livermore).
-    Evalúa {d['Ticker']} en formato corto para celular (máximo 4 puntos breves):
-    - Precio Actual: ${d['Precio']} | Score GEM: {d['Score']} ({d['Estado']})
-    - EMA 50: ${d['EMA50']} | EMA 200: ${d['EMA200']}
-    - Soportes: S1 ${d['S1']} / S2 ${d['S2']} | Resistencias: R1 ${d['R1']} / R2 ${d['R2']}
-    Indica: 1) Veredicto directo (Comprar, Esperar o Vender), 2) Fase técnica, 3) Nivel exacto de entrada o cosecha, 4) Stop Loss matemático (${d['Stop_Loss']}).
+    Evalúa {d['Ticker']} en formato corto para celular (máximo 4 puntos breves, usa USD en vez del signo de dólar para evitar formato LaTeX):
+    - Precio Actual: {d['Precio']} USD | Score GEM: {d['Score']} ({d['Estado']})
+    - EMA 50: {d['EMA50']} USD | EMA 200: {d['EMA200']} USD
+    - Soportes: S1 {d['S1']} USD / S2 {d['S2']} USD | Resistencias: R1 {d['R1']} USD / R2 {d['R2']} USD
+    Indica: 1) Veredicto directo (Comprar, Esperar o Vender), 2) Fase técnica, 3) Nivel exacto de entrada o cosecha, 4) Stop Loss matemático ({d['Stop_Loss']} USD).
     """
+    # Priorizamos gemini-3.8-flash y dejamos respaldo dinámico
+    modelos = ["gemini-3.8-flash", "gemini-3.0-flash", "gemini-2.5-pro", "gemini-pro"]
+    ultimo_error = ""
+    for nombre_modelo in modelos:
+        try:
+            model = genai.GenerativeModel(nombre_modelo)
+            resp = model.generate_content(prompt)
+            return resp.text.replace("$", "USD ")
+        except Exception as e:
+            ultimo_error = str(e)
+            continue
+
+    # Si ninguno de la lista fija coincide, busca automáticamente el primer modelo flash disponible en tu cuenta
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        resp = model.generate_content(prompt)
-        return resp.text
-    except Exception as e:
-        return f"Error al conectar con IA: {e}"
+        for m in genai.list_models():
+            if "generateContent" in m.supported_generation_methods and "flash" in m.name:
+                model = genai.GenerativeModel(m.name)
+                resp = model.generate_content(prompt)
+                return resp.text.replace("$", "USD ")
+    except Exception:
+        pass
+
+    return f"Error al conectar con IA: {ultimo_error}"
 
 # 3. INTERFAZ DE DOS PESTAÑAS LIGERAS
 tab1, tab2 = st.tabs(["🏛️ Radar Francotirador", "📋 Mini-Auditor & Balance"])
@@ -111,12 +134,13 @@ with tab1:
             c1.metric("Precio Actual", f"${datos['Precio']}")
             c2.metric("Score GEM", f"{datos['Score']} ({datos['Estado']})")
 
+            # Formato limpio con USD para evitar que Streamlit active LaTeX y ponga asteriscos
             st.markdown(f"""
-            **Niveles Operativos Clave:**
-            * 📈 **EMAs:** EMA 50: **${datos['EMA50']}** | EMA 200: **${datos['EMA200']}**
-            * 🎯 **Soportes:** S1: **${datos['S1']}** *(a {datos['Dist_S1_%']}%)* | S2: **${datos['S2']}**
-            * 🚀 **Resistencias:** R1: **${datos['R1']}** *(a +{datos['Dist_R1_%']}%)* | R2: **${datos['R2']}**
-            * 🛡️ **Stop Loss Estructural:** **${datos['Stop_Loss']}**
+            **Niveles Operativos Clave (USD):**
+            * 📈 **EMAs:** EMA 50: **{datos['EMA50']}** | EMA 200: **{datos['EMA200']}**
+            * 🎯 **Soportes:** S1: **{datos['S1']}** *(a {datos['Dist_S1_%']}%)* | S2: **{datos['S2']}**
+            * 🚀 **Resistencias:** R1: **{datos['R1']}** *(a +{datos['Dist_R1_%']}%)* | R2: **{datos['R2']}**
+            * 🛡️ **Stop Loss Estructural:** **{datos['Stop_Loss']}**
             """)
 
             if st.button("🤖 Solicitar Veredicto del Comité GEM", use_container_width=True):
@@ -181,38 +205,31 @@ with tab2:
             if resultados:
                 df_res = pd.DataFrame(resultados)
 
-                # --- CÁLCULO MATEMÁTICO DE SALUD DEL PORTAFOLIO ---
                 score_pond = sum(r["Score"] * (r["Peso (%)"] / 100) for r in resultados)
                 pct_fuerte = sum(r["Peso (%)"] for r in resultados if r["Score"] == 85)
-                pct_alerta = sum(r["Peso (%)"] for r in resultados if r["Score"] in [60, 40])
-                pct_rota = sum(r["Peso (%)"] for r in resultados if r["Score"] == 25)
 
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Capital Total", f"${total_cartera:,.2f}")
                 m2.metric("Score Cartera", f"{score_pond:.0f} / 100")
                 m3.metric("En Fase 2 🟢", f"{pct_fuerte:.1f}%")
 
-                # --- DIAGNÓSTICO AUTOMÁTICO DE BALANCE (SIN IA, INSTANTÁNEO) ---
                 st.markdown("### 🧠 Diagnóstico Rápido de Balance")
 
-                # 1. Concentración (> 25% en cuentas pequeñas o > 15% general)
                 concentradas = [f"**{r['Ticker']}** ({r['Peso (%)']}%)" for r in resultados if r["Peso (%)"] > 25]
                 if concentradas:
                     st.warning(f"⚠️ **Sobreconcentración (>25%):** {', '.join(concentradas)}. Reduce tamaño en rebotes para no depender de una sola acción.")
                 else:
                     st.success("✅ **Pesos Balanceados:** Ninguna posición supera el 25% de la cartera.")
 
-                # 2. Tendencia Rota o en Alerta
-                rotas = [f"**{r['Ticker']}** (Stop: ${r['Stop_Loss']})" for r in resultados if r["Score"] == 25]
-                alertas = [f"**{r['Ticker']}** (Debajo de EMA50: ${r['EMA50']})" for r in resultados if r["Score"] == 60]
+                rotas = [f"**{r['Ticker']}** (Stop: {r['Stop_Loss']} USD)" for r in resultados if r["Score"] == 25]
+                alertas = [f"**{r['Ticker']}** (Debajo de EMA50: {r['EMA50']} USD)" for r in resultados if r["Score"] == 60]
                 if rotas:
                     st.error(f"🚨 **Tendencia Rota (Score 25 🔴 — Limpiar):** {', '.join(rotas)}.")
                 if alertas:
                     st.info(f"🟡 **En Observación (Score 60 — Esperar rebote a EMA50 o vigilar S1):** {', '.join(alertas)}.")
 
-                # 3. Oportunidades cerca de S1 o Toma de Ganancias cerca de R1
-                cerca_s1 = [f"**{r['Ticker']}** (S1: ${r['S1']})" for r in resultados if r["Dist_S1_%"] <= 3.5 and r["Score"] >= 60]
-                cerca_r1 = [f"**{r['Ticker']}** (R1: ${r['R1']})" for r in resultados if r["Dist_R1_%"] <= 3.5]
+                cerca_s1 = [f"**{r['Ticker']}** (S1: {r['S1']} USD)" for r in resultados if r["Dist_S1_%"] <= 3.5 and r["Score"] >= 60]
+                cerca_r1 = [f"**{r['Ticker']}** (R1: {r['R1']} USD)" for r in resultados if r["Dist_R1_%"] <= 3.5]
                 if cerca_s1:
                     st.success(f"🎯 **En Zona de Compra (<3.5% de S1):** {', '.join(cerca_s1)}.")
                 if cerca_r1:
