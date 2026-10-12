@@ -1,7 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import google.generativeai as genai
+import requests
 
 # 1. CONFIGURACIÓN ULTRALIGERA PARA MÓVIL
 st.set_page_config(
@@ -11,20 +11,28 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-API_KEY = (
-    st.secrets.get("GEMINI_API_KEY")
-    or st.secrets.get("GOOGLE_API_KEY")
-    or st.secrets.get("API_KEY")
-    or ""
-).strip()
-
-if API_KEY:
-    genai.configure(api_key=API_KEY)
-
 st.title("🎯 GEM Scanner Lite")
 st.caption("Versión Móvil Ultraligera · Radar & Balance de Cartera")
 
-# 2. MOTOR MATEMÁTICO CACHEADO (5 min)
+# --- SELECTOR INTELIGENTE DE MODELOS RÁPIDOS (Idéntico a tu app.py v3.2) ---
+def obtener_modelos_ordenados(api_key):
+    try:
+        url_lista = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        lista_req = requests.get(url_lista, timeout=10).json()
+        todos = [
+            m['name'].replace('models/', '')
+            for m in lista_req.get('models', [])
+            if 'gemini' in m.get('name', '')
+            and 'generateContent' in m.get('supportedGenerationMethods', [])
+            and 'vision' not in m.get('name', '')
+        ]
+        rapidos = [m for m in todos if 'flash' in m and 'thinking' not in m and 'exp' not in m]
+        resto = [m for m in todos if m not in rapidos]
+        return rapidos + resto
+    except Exception:
+        return ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+
+# --- MOTOR MATEMÁTICO CACHEADO (5 min, sincronizado con tu app.py v3.2) ---
 @st.cache_data(ttl=300)
 def analizar_ticker(ticker_symbol):
     try:
@@ -33,41 +41,42 @@ def analizar_ticker(ticker_symbol):
         if df.empty or len(df) < 50:
             return None
 
-        close = df["Close"]
-        precio = float(close.iloc[-1])
-        ema50 = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
-        ema200 = float(close.ewm(span=200, adjust=False).mean().iloc[-1]) if len(df) >= 200 else ema50
+        close = float(df["Close"].iloc[-1])
+        ema50 = float(df["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
+        ema200 = float(df["Close"].ewm(span=200, adjust=False).mean().iloc[-1]) if len(df) >= 200 else ema50
 
-        ventana = df.tail(20)
-        high_20 = float(ventana["High"].max())
-        low_20 = float(ventana["Low"].min())
-        pivot = (high_20 + low_20 + precio) / 3.0
+        # Pivotes Institucionales de 30 días (idéntico a tu Panel 3.2)
+        ventana = df.tail(30)
+        high_30 = float(ventana["High"].max())
+        low_30 = float(ventana["Low"].min())
+        pivot = (high_30 + low_30 + close) / 3.0
 
-        r1 = (2 * pivot) - low_20
-        s1 = (2 * pivot) - high_20
-        r2 = pivot + (high_20 - low_20)
-        s2 = pivot - (high_20 - low_20)
+        r1 = (2 * pivot) - low_30
+        s1 = (2 * pivot) - high_30
+        r2 = pivot + (high_30 - low_30)
+        s2 = pivot - (high_30 - low_30)
 
-        if precio > ema50 and precio > ema200:
+        # Lógica de Score GEM idéntica a tu Panel 3.2
+        if close > ema50 and close > ema200:
             score = 85
             estado = "Fuerte 🟢"
-        elif precio > ema200 and precio <= ema50:
-            score = 60
-            estado = "Alerta 🟡"
-        elif precio <= ema200 and precio > ema50:
-            score = 40
-            estado = "Recuperando 🟠"
-        else:
+        elif close < ema50 and close < ema200:
             score = 25
             estado = "Rota 🔴"
+        elif close > ema200:
+            score = 60
+            estado = "Alerta 🟡"
+        else:
+            score = 40
+            estado = "Débil 🟠"
 
-        dist_s1 = ((precio - s1) / precio) * 100
-        dist_r1 = ((r1 - precio) / precio) * 100
+        dist_s1 = ((close - s1) / close) * 100
+        dist_r1 = ((r1 - close) / close) * 100
         stop_loss = round(min(s1, ema200) * 0.98, 2)
 
         return {
             "Ticker": ticker_symbol.upper(),
-            "Precio": round(precio, 2),
+            "Precio": round(close, 2),
             "Score": score,
             "Estado": estado,
             "EMA50": round(ema50, 2),
@@ -83,31 +92,61 @@ def analizar_ticker(ticker_symbol):
     except Exception:
         return None
 
+# --- FUNCIÓN DEL COMITÉ GEMINI (Idéntica a tu app.py v3.2) ---
 def consultar_comite_ia(d):
-    if not API_KEY:
-        return "⚠️ No se detectó GEMINI_API_KEY en los Secrets de Streamlit."
     prompt = f"""
-    Actúa como el Comité Financiero GEM (Minervini, Tudor Jones, Livermore).
-    Evalúa {d['Ticker']} en formato corto para celular (máximo 4 puntos breves, usa USD en vez del signo de dólar para evitar formato LaTeX):
-    - Precio Actual: {d['Precio']} USD | Score GEM: {d['Score']} ({d['Estado']})
-    - EMA 50: {d['EMA50']} USD | EMA 200: {d['EMA200']} USD
-    - Soportes: S1 {d['S1']} USD / S2 {d['S2']} USD | Resistencias: R1 {d['R1']} USD / R2 {d['R2']} USD
-    Indica: 1) Veredicto directo (Comprar, Esperar o Vender), 2) Fase técnica, 3) Nivel exacto de entrada o cosecha, 4) Stop Loss matemático ({d['Stop_Loss']} USD).
+    Actúa como el Comité Financiero GEM (Analista Cuantitativo Institucional).
+    Evalúa el siguiente activo usando estrictamente las reglas de Minervini, Tudor Jones y Livermore.
+
+    DATOS DEL ACTIVO:
+    Ticker: {d['Ticker']}
+    Precio Actual: {d['Precio']:.2f} USD
+    EMA 50: {d['EMA50']:.2f} USD
+    EMA 200: {d['EMA200']:.2f} USD
+    Soportes: S1 {d['S1']:.2f} USD - S2 {d['S2']:.2f} USD
+    Resistencias: R1 {d['R1']:.2f} USD - R2 {d['R2']:.2f} USD
+    Benchmark (S&P 500): Alcista (sobre EMA 200).
+
+    REGLAS DE EVALUACIÓN:
+    - Las resistencias (R1/R2) son SOLO para toma de ganancias. Prohibido comprar cerca de ellas.
+    - Los soportes (S1/S2) son zonas de entrada (exige riesgo asimétrico).
+    - Si el precio está debajo de EMA 50, la fuerza de corto plazo está rota.
+    - Si el precio está debajo de EMA 200, no se recomienda exposición larga.
+    - No uses el símbolo de dólar ($) para evitar errores de formato.
+
+    ENTREGA TU RESPUESTA EN 4 PUNTOS BREVES PARA MÓVIL (Fuerte, frío y directo):
+    1. VEREDICTO INSTITUCIONAL
+    2. DIAGNÓSTICO DE FASES
+    3. NIVELES OPERATIVOS
+    4. STOP LOSS MATEMÁTICO
     """
-# Busca automáticamente los modelos compatibles en tu cuenta y elige el más reciente
     try:
-        disponibles = [
-            m.name for m in genai.list_models()
-            if "generateContent" in m.supported_generation_methods
-        ]
-        # Preferir modelos flash recientes
-        elegido = next((m for m in disponibles if "flash" in m), disponibles[0])
-        model = genai.GenerativeModel(elegido)
-        resp = model.generate_content(prompt)
-        return resp.text.replace("$", "USD ")
+        api_key = st.secrets["GEMINI_API_KEY"].strip()
+        headers = {"Content-Type": "application/json"}
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        modelos = obtener_modelos_ordenados(api_key)
+        ultimo_error = "Sin respuesta"
+
+        for modelo in modelos:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={api_key}"
+                response = requests.post(url, headers=headers, json=payload, timeout=20)
+                if response.status_code == 200:
+                    data = response.json()
+                    if "candidates" in data and len(data["candidates"]) > 0 and "content" in data["candidates"][0]:
+                        texto = data["candidates"][0]["content"]["parts"][0]["text"].replace("$", "USD ")
+                        return f"✅ *(Conectado vía {modelo})*\n\n" + texto
+                ultimo_error = f"{modelo}: {response.status_code}"
+            except requests.exceptions.Timeout:
+                ultimo_error = f"Timeout en {modelo}"
+                continue
+            except Exception as e_inner:
+                ultimo_error = str(e_inner)
+                continue
+        return f"❌ Google no respondió a tiempo. Último estado: {ultimo_error}"
     except Exception as e:
-        return f"Error al conectar con IA: {e}"
-        
+        return f"❌ Error fatal Gemini: {e}"
+
 # 3. INTERFAZ DE DOS PESTAÑAS LIGERAS
 tab1, tab2 = st.tabs(["🏛️ Radar Francotirador", "📋 Mini-Auditor & Balance"])
 
@@ -124,7 +163,6 @@ with tab1:
             c1.metric("Precio Actual", f"${datos['Precio']}")
             c2.metric("Score GEM", f"{datos['Score']} ({datos['Estado']})")
 
-            # Formato limpio con USD para evitar que Streamlit active LaTeX y ponga asteriscos
             st.markdown(f"""
             **Niveles Operativos Clave (USD):**
             * 📈 **EMAs:** EMA 50: **{datos['EMA50']}** | EMA 200: **{datos['EMA200']}**
