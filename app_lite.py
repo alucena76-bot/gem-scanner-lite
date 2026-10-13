@@ -12,9 +12,21 @@ st.set_page_config(
 )
 
 st.title("🎯 GEM Scanner Lite")
-st.caption("Versión Móvil Ultraligera · Radar & Balance de Cartera")
+st.caption("Versión Móvil Ultraligera · Radar Institucional & Auditoría")
 
-# --- SELECTOR INTELIGENTE DE MODELOS RÁPIDOS (Idéntico a tu app.py v3.2) ---
+# --- LISTA PREDEFINIDA DE LÍDERES SECTORIALES (Descorrelación Dalio) ---
+UNIVERSO_SECTORIAL = {
+    "Consumo Básico": ["COST", "WMT", "PG"],
+    "Industria / Maquinaria": ["CAT", "GE", "URI"],
+    "Finanzas / Banca": ["JPM", "V", "MA"],
+    "Salud / Farma": ["LLY", "UNH", "ABBV"],
+    "Energía / Infraestructura": ["XOM", "BE", "NEE"],
+    "Tecnología / Crecimiento": ["QQQ", "AAPL", "GOOGL"]
+}
+
+TICKERS_UNIVERSO = [t for grupo in UNIVERSO_SECTORIAL.values() for t in grupo]
+
+# --- SELECTOR INTELIGENTE DE MODELOS RÁPIDOS ---
 def obtener_modelos_ordenados(api_key):
     try:
         url_lista = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
@@ -32,7 +44,7 @@ def obtener_modelos_ordenados(api_key):
     except Exception:
         return ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
 
-# --- MOTOR MATEMÁTICO CACHEADO (5 min, sincronizado con tu app.py v3.2) ---
+# --- MOTOR MATEMÁTICO CACHEADO (5 min) ---
 @st.cache_data(ttl=300)
 def analizar_ticker(ticker_symbol):
     try:
@@ -45,7 +57,6 @@ def analizar_ticker(ticker_symbol):
         ema50 = float(df["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
         ema200 = float(df["Close"].ewm(span=200, adjust=False).mean().iloc[-1]) if len(df) >= 200 else ema50
 
-        # Pivotes Institucionales de 30 días (idéntico a tu Panel 3.2)
         ventana = df.tail(30)
         high_30 = float(ventana["High"].max())
         low_30 = float(ventana["Low"].min())
@@ -56,7 +67,6 @@ def analizar_ticker(ticker_symbol):
         r2 = pivot + (high_30 - low_30)
         s2 = pivot - (high_30 - low_30)
 
-        # Lógica de Score GEM idéntica a tu Panel 3.2
         if close > ema50 and close > ema200:
             score = 85
             estado = "Fuerte 🟢"
@@ -92,7 +102,7 @@ def analizar_ticker(ticker_symbol):
     except Exception:
         return None
 
-# --- FUNCIÓN DEL COMITÉ GEMINI (Idéntica a tu app.py v3.2) ---
+# --- COMITÉ GEMINI ---
 def consultar_comite_ia(d):
     prompt = f"""
     Actúa como el Comité Financiero GEM (Analista Cuantitativo Institucional).
@@ -114,7 +124,7 @@ def consultar_comite_ia(d):
     - Si el precio está debajo de EMA 200, no se recomienda exposición larga.
     - No uses el símbolo de dólar ($) para evitar errores de formato.
 
-    ENTREGA TU RESPUESTA EN 4 PUNTOS BREVES PARA MÓVIL (Fuerte, frío y directo):
+    ENTREGA TU RESPUESTA EN 4 PUNTOS BREVES PARA MÓVIL:
     1. VEREDICTO INSTITUCIONAL
     2. DIAGNÓSTICO DE FASES
     3. NIVELES OPERATIVOS
@@ -137,9 +147,6 @@ def consultar_comite_ia(d):
                         texto = data["candidates"][0]["content"]["parts"][0]["text"].replace("$", "USD ")
                         return f"✅ *(Conectado vía {modelo})*\n\n" + texto
                 ultimo_error = f"{modelo}: {response.status_code}"
-            except requests.exceptions.Timeout:
-                ultimo_error = f"Timeout en {modelo}"
-                continue
             except Exception as e_inner:
                 ultimo_error = str(e_inner)
                 continue
@@ -147,40 +154,84 @@ def consultar_comite_ia(d):
     except Exception as e:
         return f"❌ Error fatal Gemini: {e}"
 
-# 3. INTERFAZ DE DOS PESTAÑAS LIGERAS
+# 3. INTERFAZ
 tab1, tab2 = st.tabs(["🏛️ Radar Francotirador", "📋 Mini-Auditor & Balance"])
 
 with tab1:
-    st.subheader("Escáner Individual Instantáneo")
-    ticker_input = st.text_input("Ticker a evaluar:", value="COHR").upper().strip()
+    st.subheader("Búsqueda y Detección de Oportunidades")
+    
+    modo_radar = st.radio("Método de Análisis:", ["Ticker Individual", "Escanear Universo Sectorial (18 Reyes)"], horizontal=True)
 
-    if ticker_input:
-        with st.spinner(f"Escaneando {ticker_input}..."):
-            datos = analizar_ticker(ticker_input)
+    if modo_radar == "Ticker Individual":
+        col_t1, col_t2 = st.columns([2, 1])
+        with col_t1:
+            ticker_input = st.text_input("Ingresa Ticker:", value="COHR").upper().strip()
+        with col_t2:
+            preset_rapido = st.selectbox("O selecciona líder:", [""] + TICKERS_UNIVERSO)
+            if preset_rapido:
+                ticker_input = preset_rapido
 
-        if datos:
-            c1, c2 = st.columns(2)
-            c1.metric("Precio Actual", f"${datos['Precio']}")
-            c2.metric("Score GEM", f"{datos['Score']} ({datos['Estado']})")
+        if ticker_input:
+            with st.spinner(f"Analizando {ticker_input}..."):
+                datos = analizar_ticker(ticker_input)
 
-            st.markdown(f"""
-            **Niveles Operativos Clave (USD):**
-            * 📈 **EMAs:** EMA 50: **{datos['EMA50']}** | EMA 200: **{datos['EMA200']}**
-            * 🎯 **Soportes:** S1: **{datos['S1']}** *(a {datos['Dist_S1_%']}%)* | S2: **{datos['S2']}**
-            * 🚀 **Resistencias:** R1: **{datos['R1']}** *(a +{datos['Dist_R1_%']}%)* | R2: **{datos['R2']}**
-            * 🛡️ **Stop Loss Estructural:** **{datos['Stop_Loss']}**
-            """)
+            if datos:
+                c1, c2 = st.columns(2)
+                c1.metric("Precio Actual", f"${datos['Precio']}")
+                c2.metric("Score GEM", f"{datos['Score']} ({datos['Estado']})")
 
-            if st.button("🤖 Solicitar Veredicto del Comité GEM", use_container_width=True):
-                with st.spinner("Consultando al Comité..."):
-                    st.info(consultar_comite_ia(datos))
-        else:
-            st.error("No se pudo cargar el ticker. Verifica el símbolo.")
+                st.markdown(f"""
+                **Niveles Operativos Clave (USD):**
+                * 📈 **EMAs:** EMA 50: **{datos['EMA50']}** | EMA 200: **{datos['EMA200']}**
+                * 🎯 **Soportes:** S1: **{datos['S1']}** *(a {datos['Dist_S1_%']}%)* | S2: **{datos['S2']}**
+                * 🚀 **Resistencias:** R1: **{datos['R1']}** *(a +{datos['Dist_R1_%']}%)* | R2: **{datos['R2']}**
+                * 🛡️ **Stop Loss Estructural:** **{datos['Stop_Loss']}**
+                """)
+
+                if st.button("🤖 Solicitar Veredicto del Comité GEM", use_container_width=True):
+                    with st.spinner("Consultando al Comité..."):
+                        st.info(consultar_comite_ia(datos))
+            else:
+                st.error("No se pudo cargar el ticker. Verifica el símbolo.")
+
+    else:
+        st.markdown("**18 Líderes Diversificados (Consumo, Industria, Finanzas, Salud, Energía, Tech):**")
+        if st.button("🔍 Escanear Universo Sectorial Ahora", use_container_width=True):
+            lista_res = []
+            barra = st.progress(0)
+            for i, sym in enumerate(TICKERS_UNIVERSO):
+                r = analizar_ticker(sym)
+                if r:
+                    # Identificar sector
+                    sector_encontrado = next((sec for sec, ticks in UNIVERSO_SECTORIAL.items() if sym in ticks), "General")
+                    r["Sector"] = sector_encontrado
+                    lista_res.append(r)
+                barra.progress(min((i + 1) / len(TICKERS_UNIVERSO), 1.0))
+            barra.empty()
+
+            if lista_res:
+                df_univ = pd.DataFrame(lista_res)
+                
+                # Filtrar solo oportunidades de calidad: Score >= 60
+                en_zona = df_univ[(df_univ["Score"] >= 60) & (df_univ["Dist_S1_%"] <= 4.0)]
+                fase2 = df_univ[df_univ["Score"] == 85]
+
+                if not en_zona.empty:
+                    st.success(f"🎯 **Candidatos en Zona de Recarga (<4% de S1):** {', '.join(en_zona['Ticker'].tolist())}")
+                else:
+                    st.info("ℹ️ Ningún activo está a menos del 4% de S1 hoy. Paciencia de francotirador.")
+
+                st.markdown("### 📊 Radiografía Completa del Universo")
+                st.dataframe(
+                    df_univ[["Sector", "Ticker", "Precio", "Score", "Estado", "Dist_S1_%", "EMA50", "EMA200", "S1", "R1"]],
+                    use_container_width=True,
+                    hide_index=True
+                )
 
 with tab2:
     st.subheader("Auditor de Balance y Salud de Cartera")
     preset = st.radio(
-        "Elige plantilla rápida (puedes editar montos y agregar filas abajo):",
+        "Elige plantilla rápida:",
         ["Cuenta Schwab ($288)", "Cartera Hijo (Ejemplo)", "Radares del Día"],
         horizontal=True
     )
@@ -245,7 +296,7 @@ with tab2:
 
                 concentradas = [f"**{r['Ticker']}** ({r['Peso (%)']}%)" for r in resultados if r["Peso (%)"] > 25]
                 if concentradas:
-                    st.warning(f"⚠️ **Sobreconcentración (>25%):** {', '.join(concentradas)}. Reduce tamaño en rebotes para no depender de una sola acción.")
+                    st.warning(f"⚠️ **Sobreconcentración (>25%):** {', '.join(concentradas)}.")
                 else:
                     st.success("✅ **Pesos Balanceados:** Ninguna posición supera el 25% de la cartera.")
 
@@ -254,7 +305,7 @@ with tab2:
                 if rotas:
                     st.error(f"🚨 **Tendencia Rota (Score 25 🔴 — Limpiar):** {', '.join(rotas)}.")
                 if alertas:
-                    st.info(f"🟡 **En Observación (Score 60 — Esperar rebote a EMA50 o vigilar S1):** {', '.join(alertas)}.")
+                    st.info(f"🟡 **En Observación (Score 60):** {', '.join(alertas)}.")
 
                 cerca_s1 = [f"**{r['Ticker']}** (S1: {r['S1']} USD)" for r in resultados if r["Dist_S1_%"] <= 3.5 and r["Score"] >= 60]
                 cerca_r1 = [f"**{r['Ticker']}** (R1: {r['R1']} USD)" for r in resultados if r["Dist_R1_%"] <= 3.5]
