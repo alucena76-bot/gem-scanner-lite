@@ -27,7 +27,9 @@ UNIVERSO_SECTORIAL = {
 TICKERS_UNIVERSO = [t for grupo in UNIVERSO_SECTORIAL.values() for t in grupo]
 
 # --- SELECTOR INTELIGENTE DE MODELOS RÁPIDOS ---
+@st.cache_data(ttl=3600)
 def obtener_modelos_ordenados(api_key):
+    
     try:
         url_lista = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
         lista_req = requests.get(url_lista, timeout=10).json()
